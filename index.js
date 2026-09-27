@@ -38,26 +38,30 @@ app.post('/sendmail', async (req, res) => {
             return res.status(500).send('Email credentials not found in database');
         }
 
-        // 2. Configure Transporter
+        // 2. Configure Transporter with explicit host, port 587, and IPv4 enforcement
         const transporter = nodemailer.createTransport({
-            service: 'gmail',
+            host: 'smtp.gmail.com',
+            port: 587,          
+            secure: false, 
             auth: {
                 user: data[0].toJSON().user,
                 pass: data[0].toJSON().pass
-            }
+            },
+            tls: {
+                rejectUnauthorized: false
+            },
+            family: 4
         });
 
-        // 3. Send emails concurrently
-        const emailPromises = emailList.map(item => {
-            return transporter.sendMail({
-                from: 'azizpheonix51@gmail.com',
+        // 3. Send emails sequentially using a loop to avoid overwhelming Render proxy/timeouts
+        for (const item of emailList) {
+            await transporter.sendMail({
+                from: data[0].toJSON().user,
                 to: item,
                 subject: 'Message from BulkMail App',
                 text: message
             });
-        });
-
-        await Promise.all(emailPromises);
+        }
 
         // 4. Save history records
         const historyRecords = emailList.map(item => ({
