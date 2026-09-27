@@ -1,9 +1,13 @@
 const express = require('express');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
+const dotenv = require('dotenv');
+const { Resend } = require('resend');
 const mongoose = require('mongoose');
 
 const app = express();
+
+// Initialize Resend securely using Render's environment variable
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Database Connection
 mongoose.connect('mongodb://azizpheonix51_db_user:MyPassword123@ac-dkdinox-shard-00-00.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-01.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-02.ocsz8qh.mongodb.net:27017/bulkmail?ssl=true&replicaSet=atlas-edapqz-shard-0&authSource=admin&appName=BulkmailApp')
@@ -11,8 +15,6 @@ mongoose.connect('mongodb://azizpheonix51_db_user:MyPassword123@ac-dkdinox-shard
     .catch((error) => console.log('Database connection failed', error));
 
 // Models
-const login = mongoose.model('login', {}, 'logincredentials');
-
 const history = mongoose.model('history', {
     email: String,
     message: String,
@@ -32,42 +34,22 @@ app.post('/sendmail', async (req, res) => {
     }
 
     try {
-        // 1. Fetch credentials from DB
-        const data = await login.find();
-        if (!data || data.length === 0) {
-            return res.status(500).send('Email credentials not found in database');
-        }
-
-        // 2. Configure Transporter with explicit host, port 587, and IPv4 enforcement
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,          
-            secure: false, 
-            auth: {
-                user: data[0].toJSON().user,
-                pass: data[0].toJSON().pass
-            },
-            tls: {
-                rejectUnauthorized: false
-            },
-            family: 4
-        });
-
-        // 3. Send emails sequentially using a loop to avoid overwhelming Render proxy/timeouts
-        for (const item of emailList) {
-            await transporter.sendMail({
-                from: data[0].toJSON().user,
+        const emailPromises = emailList.map(item => {
+            return resend.emails.send({
+                from: 'BulkMail App <onboarding@resend.dev>',
                 to: item,
                 subject: 'Message from BulkMail App',
                 text: message
             });
-        }
+        });
 
-        // 4. Save history records
+        await Promise.all(emailPromises);
+
+        // Save history records
         const historyRecords = emailList.map(item => ({
             email: item,
             message: message,
-            date: new Date().toLocaleDateString() 
+            date: new Date().toLocaleDateString()
         }));
 
         await history.create(historyRecords);
@@ -82,7 +64,7 @@ app.post('/sendmail', async (req, res) => {
 // GET: Fetch History Records
 app.get('/history', async (req, res) => {
     try {
-        const historySend = await history.find(); 
+        const historySend = await history.find();
         res.status(200).send(historySend);
     } catch (error) {
         console.error('Something went wrong:', error);
