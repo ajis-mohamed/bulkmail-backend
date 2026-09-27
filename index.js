@@ -5,10 +5,12 @@ const mongoose = require('mongoose');
 
 const app = express();
 
-// Database Connection
-mongoose.connect('mongodb://azizpheonix51_db_user:MyPassword123@ac-dkdinox-shard-00-00.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-01.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-02.ocsz8qh.mongodb.net:27017/bulkmail?ssl=true&replicaSet=atlas-edapqz-shard-0&authSource=admin&appName=BulkmailApp')
-    .then(() => console.log('Database Connected'))
-    .catch((error) => console.log('Database connection failed', error));
+// Database Connection (cached or standard connection)
+if (mongoose.connection.readyState === 0) {
+    mongoose.connect('mongodb://azizpheonix51_db_user:MyPassword123@ac-dkdinox-shard-00-00.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-01.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-02.ocsz8qh.mongodb.net:27017/bulkmail?ssl=true&replicaSet=atlas-edapqz-shard-0&authSource=admin&appName=BulkmailApp')
+        .then(() => console.log('Database Connected'))
+        .catch((error) => console.log('Database connection failed', error));
+}
 
 // Models
 const history = mongoose.model('history', {
@@ -41,7 +43,7 @@ app.post('/sendmail', async (req, res) => {
         const senderEmail = data[0].toJSON().user;
         const senderPass = data[0].toJSON().pass;
 
-        // Configure Nodemailer with Gmail & force IPv4 to prevent Render network crashes
+        // Configure Nodemailer with Gmail
         const transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
             port: 587,
@@ -50,11 +52,10 @@ app.post('/sendmail', async (req, res) => {
                 user: senderEmail,
                 pass: senderPass
             },
-            tls: { rejectUnauthorized: false },
-            family: 4 // Forces IPv4 (bypasses Render ENETUNREACH bug)
+            tls: { rejectUnauthorized: false }
         });
 
-        // Send emails sequentially with a slight pause to avoid Google rate-limits
+        // Send emails sequentially
         for (const recipient of emailList) {
             await transporter.sendMail({
                 from: senderEmail,
@@ -62,8 +63,8 @@ app.post('/sendmail', async (req, res) => {
                 subject: 'Message from BulkMail App',
                 text: message
             });
-            // Small 500ms pause between emails
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // Small pause between emails
+            await new Promise(resolve => setTimeout(resolve, 300));
         }
 
         // Save history records
@@ -93,7 +94,5 @@ app.get('/history', async (req, res) => {
     }
 });
 
-// Start Server
-app.listen(5000, () => {
-    console.log('Server is running on port 5000...');
-});
+// Export app for Vercel Serverless Functions
+module.exports = app;
