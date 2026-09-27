@@ -1,13 +1,9 @@
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const mongoose = require('mongoose');
 
 const app = express();
-
-// Initialize Resend securely using Render's environment variable
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Database Connection
 mongoose.connect('mongodb://azizpheonix51_db_user:MyPassword123@ac-dkdinox-shard-00-00.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-01.ocsz8qh.mongodb.net:27017,ac-dkdinox-shard-00-02.ocsz8qh.mongodb.net:27017/bulkmail?ssl=true&replicaSet=atlas-edapqz-shard-0&authSource=admin&appName=BulkmailApp')
@@ -21,11 +17,13 @@ const history = mongoose.model('history', {
     date: String
 }, 'historydata');
 
+const login = mongoose.model('login', {}, 'logincredentials');
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// POST: Send Emails & Save History
+// POST: Send Emails via Gmail SMTP & Save History
 app.post('/sendmail', async (req, res) => {
     const { message, emailList } = req.body;
 
@@ -34,16 +32,39 @@ app.post('/sendmail', async (req, res) => {
     }
 
     try {
-        const emailPromises = emailList.map(item => {
-            return resend.emails.send({
-                from: 'BulkMail App <onboarding@resend.dev>',
-                to: item,
+        // Fetch credentials from MongoDB
+        const data = await login.find();
+        if (!data || data.length === 0) {
+            return res.status(500).send('No login credentials found in database');
+        }
+
+        const senderEmail = data[0].toJSON().user;
+        const senderPass = data[0].toJSON().pass;
+
+        // Configure Nodemailer with Gmail & force IPv4 to prevent Render network crashes
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+                user: senderEmail,
+                pass: senderPass
+            },
+            tls: { rejectUnauthorized: false },
+            family: 4 // Forces IPv4 (bypasses Render ENETUNREACH bug)
+        });
+
+        // Send emails sequentially with a slight pause to avoid Google rate-limits
+        for (const recipient of emailList) {
+            await transporter.sendMail({
+                from: senderEmail,
+                to: recipient,
                 subject: 'Message from BulkMail App',
                 text: message
             });
-        });
-
-        await Promise.all(emailPromises);
+            // Small 500ms pause between emails
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
 
         // Save history records
         const historyRecords = emailList.map(item => ({
@@ -54,7 +75,7 @@ app.post('/sendmail', async (req, res) => {
 
         await history.create(historyRecords);
 
-        res.status(200).send('All emails sent successfully!');
+        res.status(200).send('All emails sent successfully through Gmail!');
     } catch (error) {
         console.error('Something went wrong:', error);
         res.status(500).send('Email failed to send');
